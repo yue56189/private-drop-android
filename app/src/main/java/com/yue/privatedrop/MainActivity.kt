@@ -58,7 +58,7 @@ class MainActivity : AppCompatActivity() {
     private fun base() = etServer.text.toString().trim().trimEnd('/')
     private fun token() = etToken.text.toString().trim()
     private fun nick() = etNick.text.toString().trim()
-    private fun api(path: String) = "$base$path${if (path.contains('?')) '&' else '?'}t=${token()}"
+    private fun api(path: String) = "${base()}$path${if (path.contains('?')) '&' else '?'}t=${token()}"
 
     private val filePicker =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -196,7 +196,7 @@ class MainActivity : AppCompatActivity() {
     private fun addBubble(nick: String, text: String, mine: Boolean, ts: Long) {
         val tv = TextView(this).apply {
             textSize = 15f
-            text = "$text   ${timeStr(ts)}"
+            setText("$text   ${timeStr(ts)}")
             setTextColor(ContextCompat.getColor(context,
                 if (mine) R.color.on_primary_container else R.color.on_surface))
             background = ContextCompat.getDrawable(context,
@@ -235,7 +235,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun addCenter(text: String) {
         val tv = TextView(this).apply {
-            text = text; textSize = 11f; gravity = Gravity.CENTER
+            setText(text); textSize = 11f; gravity = Gravity.CENTER
             setTextColor(ContextCompat.getColor(context, R.color.on_surface_variant))
         }
         addRow(tv, centered = true)
