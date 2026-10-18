@@ -25,6 +25,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -316,7 +317,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addBubble(nick: String, text: String, mine: Boolean, ts: Long) {
-        val txtColor = ContextCompat.getColor(context,
+        val txtColor = ContextCompat.getColor(this,
             if (mine) R.color.on_primary_container else R.color.on_surface)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -331,7 +332,7 @@ class MainActivity : AppCompatActivity() {
             maxWidth = dp(260)
         }
         val tvTime = TextView(this).apply {
-            text = timeStr(ts); textSize = 10f; gravity = Gravity.END
+            setText(timeStr(ts)); textSize = 10f; gravity = Gravity.END
             setTextColor(txtColor); alpha = 0.55f
         }
         col.addView(tvMsg); col.addView(tvTime)
