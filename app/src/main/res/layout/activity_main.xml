@@ -1,117 +1,209 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@color/surface">
+    android:layout_height="match_parent">
 
-    <!-- 连接设置 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="8dp"
-        android:gravity="center_vertical">
-
-        <EditText
-            android:id="@+id/etServer"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1.4"
-            android:hint="@string/hint_server"
-            android:inputType="textUri"
-            android:textSize="13sp"
-            android:maxLines="1" />
-
-        <EditText
-            android:id="@+id/etToken"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="0.8"
-            android:hint="@string/hint_token"
-            android:inputType="text"
-            android:textSize="13sp"
-            android:maxLines="1" />
-
-        <EditText
-            android:id="@+id/etNick"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="0.8"
-            android:hint="@string/hint_nick"
-            android:inputType="text"
-            android:textSize="13sp"
-            android:maxLines="1" />
-
-        <Button
-            android:id="@+id/btnConnect"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/connect"
-            android:textSize="13sp" />
-    </LinearLayout>
-
-    <!-- 每日格言 -->
-    <TextView
-        android:id="@+id/tvQuote"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp"
-        android:paddingBottom="6dp"
-        android:textSize="12sp"
-        android:textStyle="italic"
-        android:textColor="@color/on_surface_variant"
-        android:visibility="gone" />
-
-    <!-- 消息区 -->
+    <!-- 启动界面：全屏背景 + 三行输入 -->
     <ScrollView
-        android:id="@+id/scroll"
+        android:id="@+id/loginRoot"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:background="@color/surface_container"
+        android:layout_height="match_parent"
         android:fillViewport="true">
 
         <LinearLayout
-            android:id="@+id/llMessages"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="8dp" />
+            android:gravity="center"
+            android:padding="24dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/bg_login_card"
+                android:padding="24dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:text="▣ 私匣"
+                    android:textSize="24sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/primary" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="20dp"
+                    android:text="三端互通 · 文件优先 P2P 直连"
+                    android:textSize="12sp"
+                    android:textColor="@color/on_surface_variant" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="服务器地址"
+                    android:textSize="12sp"
+                    android:textColor="@color/on_surface_variant" />
+
+                <EditText
+                    android:id="@+id/etServer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="12dp"
+                    android:hint="服务器地址"
+                    android:inputType="textUri"
+                    android:maxLines="1"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="访问口令"
+                    android:textSize="12sp"
+                    android:textColor="@color/on_surface_variant" />
+
+                <EditText
+                    android:id="@+id/etToken"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="12dp"
+                    android:hint="访问口令"
+                    android:inputType="text"
+                    android:maxLines="1"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="昵称"
+                    android:textSize="12sp"
+                    android:textColor="@color/on_surface_variant" />
+
+                <EditText
+                    android:id="@+id/etNick"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="16dp"
+                    android:hint="昵称"
+                    android:inputType="text"
+                    android:maxLines="1"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnConnect"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="进入房间"
+                    android:textSize="15sp" />
+            </LinearLayout>
+        </LinearLayout>
     </ScrollView>
 
-    <!-- 输入区 -->
+    <!-- 聊天界面 -->
     <LinearLayout
+        android:id="@+id/chatRoot"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="8dp"
-        android:gravity="center_vertical">
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="@color/surface"
+        android:visibility="gone">
 
-        <Button
-            android:id="@+id/btnFile"
-            android:layout_width="wrap_content"
+        <TextView
+            android:id="@+id/tvQuote"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="文件"
-            android:textSize="13sp" />
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:textSize="12sp"
+            android:textStyle="italic"
+            android:textColor="@color/on_surface_variant"
+            android:visibility="gone" />
 
-        <EditText
-            android:id="@+id/etInput"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
+        <ScrollView
+            android:id="@+id/scroll"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
             android:layout_weight="1"
-            android:layout_marginStart="6dp"
-            android:layout_marginEnd="6dp"
-            android:hint="@string/hint_input"
-            android:maxLines="4"
-            android:inputType="textMultiLine|textCapSentences" />
+            android:background="@color/surface_container"
+            android:fillViewport="true">
 
-        <Button
-            android:id="@+id/btnSend"
-            android:layout_width="wrap_content"
+            <LinearLayout
+                android:id="@+id/llMessages"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="8dp" />
+        </ScrollView>
+
+        <!-- 传输进度 -->
+        <LinearLayout
+            android:id="@+id/progressRow"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/send"
-            android:textSize="13sp" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="4dp"
+            android:visibility="gone">
+
+            <ProgressBar
+                android:id="@+id/pb"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1" />
+
+            <TextView
+                android:id="@+id/tvProgress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:textSize="12sp"
+                android:textColor="@color/on_surface_variant" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="8dp"
+            android:gravity="center_vertical">
+
+            <Button
+                android:id="@+id/btnFile"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="文件"
+                android:textSize="13sp" />
+
+            <EditText
+                android:id="@+id/etInput"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:layout_marginEnd="6dp"
+                android:hint="@string/hint_input"
+                android:maxLines="4"
+                android:inputType="textMultiLine|textCapSentences" />
+
+            <Button
+                android:id="@+id/btnSend"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/send"
+                android:textSize="13sp" />
+        </LinearLayout>
     </LinearLayout>
-</LinearLayout>
+</FrameLayout>

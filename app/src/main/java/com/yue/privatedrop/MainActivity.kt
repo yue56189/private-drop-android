@@ -13,6 +13,7 @@ import android.webkit.MimeTypeMap
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -25,8 +26,10 @@ import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -46,6 +49,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var scroll: ScrollView
     private lateinit var tvQuote: TextView
     private lateinit var btnConnect: Button
+    private lateinit var loginRoot: View
+    private lateinit var chatRoot: View
+    private lateinit var progressRow: View
+    private lateinit var pb: ProgressBar
+    private lateinit var tvProgress: TextView
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -77,6 +85,11 @@ class MainActivity : AppCompatActivity() {
         scroll = findViewById(R.id.scroll)
         tvQuote = findViewById(R.id.tvQuote)
         btnConnect = findViewById(R.id.btnConnect)
+        loginRoot = findViewById(R.id.loginRoot)
+        chatRoot = findViewById(R.id.chatRoot)
+        progressRow = findViewById(R.id.progressRow)
+        pb = findViewById(R.id.pb)
+        tvProgress = findViewById(R.id.tvProgress)
 
         val prefs = getSharedPreferences("privatedrop", MODE_PRIVATE)
         etServer.setText(prefs.getString("server", "http://8.141.122.46:8765"))
@@ -118,12 +131,14 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     connected = true
                     btnConnect.isEnabled = true
+                    loginRoot.visibility = View.GONE
+                    chatRoot.visibility = View.VISIBLE
                     toast("已连接")
                     scroll.post { scroll.fullScroll(ScrollView.FOCUS_DOWN) }
                 }
                 loadQuote()
 
-                while (true) {
+                while (connected) {
                     try {
                         http.newCall(Request.Builder()
                             .url(api("/api/stream?nick=${enc(nick())}&pid=$pid"))
@@ -167,6 +182,49 @@ class MainActivity : AppCompatActivity() {
                 tvQuote.visibility = View.VISIBLE
             }
         } catch (_: Exception) { }
+    }
+
+    // ---------- 传输进度 ----------
+    private fun showProgress(label: String) {
+        progressRow.visibility = View.VISIBLE
+        pb.progress = 0
+        tvProgress.text = label
+    }
+
+    private fun updateProgress(label: String, frac: Double) {
+        runOnUiThread {
+            progressRow.visibility = View.VISIBLE
+            pb.progress = (frac * 100).toInt().coerceIn(0, 100)
+            tvProgress.text = "$label ${ (frac * 100).toInt() }%"
+        }
+    }
+
+    private fun hideProgress() = runOnUiThread { progressRow.visibility = View.GONE }
+
+    /** 带进度回调的 RequestBody。 */
+    private class ProgressRequestBody(
+        private val file: File,
+        private val onProgress: (Double) -> Unit,
+    ) : RequestBody() {
+        private val media = "application/octet-stream".toMediaType()
+
+        override fun contentType() = media
+        override fun contentLength() = file.length()
+
+        override fun writeTo(sink: BufferedSink) {
+            val total = file.length()
+            var sent = 0L
+            file.inputStream().use { input ->
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    sink.write(buf, 0, n)
+                    sent += n
+                    if (total > 0) onProgress(sent.toDouble() / total)
+                }
+            }
+        }
     }
 
     private fun render(m: JSONObject) {
@@ -271,19 +329,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun upload(uri: Uri) {
         GlobalScope.launch(Dispatchers.IO) {
+            var cache: File? = null
             try {
-                val cache = File(cacheDir, "upload.bin")
+                val tmp = File(cacheDir, "upload.bin")
+                cache = tmp
                 contentResolver.openInputStream(uri)!!.use { input ->
-                    cache.outputStream().use { input.copyTo(it) }
+                    tmp.outputStream().use { input.copyTo(it) }
                 }
                 val name = queryName(uri)
-                runOnUiThread { toast("上传中：$name") }
+                val short = if (name.length > 14) name.take(14) + "…" else name
                 http.newCall(Request.Builder()
                     .url(api("/api/upload?nick=${enc(nick())}&name=${enc(name)}"))
-                    .post(cache.asRequestBody()).build()).execute().close()
-                cache.delete()
+                    .post(ProgressRequestBody(tmp) { updateProgress("↑ $short", it) })
+                    .build()).execute().close()
+                tmp.delete()
+                cache = null
+                hideProgress()
                 runOnUiThread { toast("上传完成") }
             } catch (e: Exception) {
+                cache?.delete()
+                hideProgress()
                 runOnUiThread { toast("上传失败：${e.message}") }
             }
         }
@@ -300,9 +365,11 @@ class MainActivity : AppCompatActivity() {
     private fun download(fid: String, name: String) {
         GlobalScope.launch(Dispatchers.IO) {
             try {
+                val short = if (name.length > 14) name.take(14) + "…" else name
                 http.newCall(Request.Builder().url(api("/api/file/$fid")).build())
                     .execute().use { resp ->
                         if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
+                        val total = resp.body!!.contentLength()
                         val values = ContentValues().apply {
                             put(MediaStore.Downloads.DISPLAY_NAME, name)
                             put(MediaStore.Downloads.MIME_TYPE, mimeOf(name))
@@ -311,11 +378,22 @@ class MainActivity : AppCompatActivity() {
                             MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                             ?: throw IOException("无法写入下载目录")
                         contentResolver.openOutputStream(uri)!!.use { out ->
-                            resp.body!!.byteStream().copyTo(out)
+                            val src = resp.body!!.byteStream()
+                            val buf = ByteArray(64 * 1024)
+                            var got = 0L
+                            while (true) {
+                                val n = src.read(buf)
+                                if (n < 0) break
+                                out.write(buf, 0, n)
+                                got += n
+                                if (total > 0) updateProgress("↓ $short", got.toDouble() / total)
+                            }
                         }
                     }
+                hideProgress()
                 runOnUiThread { toast("已保存到下载：$name") }
             } catch (e: Exception) {
+                hideProgress()
                 runOnUiThread { toast("下载失败：${e.message}") }
             }
         }
