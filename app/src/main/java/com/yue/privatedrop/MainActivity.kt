@@ -20,9 +20,13 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
+import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -37,6 +41,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
@@ -54,14 +59,45 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progressRow: View
     private lateinit var pb: ProgressBar
     private lateinit var tvProgress: TextView
+    private lateinit var btnPause: Button
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
+    /** 传输串行化：单线程队列，进度行永远对应正在执行的任务。 */
+    private val transferExecutor = Executors.newSingleThreadExecutor()
+
     @Volatile private var connected = false
+    @Volatile private var current: Transfer? = null
     private val pid = UUID.randomUUID().toString().replace("-", "").take(16)
+
+    /** 一次上传/下载的状态：暂停/取消 + 速度统计。 */
+    private class Transfer(val label: String) {
+        @Volatile var paused = false
+        @Volatile var cancelled = false
+        var call: Call? = null
+        private var lastB = 0L
+        private var lastT = 0L
+
+        /** 在阻塞循环里周期调用：暂停时挂起，取消时抛异常。 */
+        fun gate() {
+            while (paused && !cancelled) Thread.sleep(120)
+            if (cancelled) throw IOException("已取消")
+        }
+
+        /** 计算瞬时速度（字节/秒），返回 null 表示间隔太短不用刷新。 */
+        @Synchronized fun tick(bytes: Long): Double? {
+            val now = System.currentTimeMillis()
+            val dt = now - lastT
+            if (lastT == 0L) { lastB = bytes; lastT = now; return null }
+            if (dt < 300) return null
+            val speed = (bytes - lastB) * 1000.0 / dt
+            lastB = bytes; lastT = now
+            return speed.coerceAtLeast(0.0)
+        }
+    }
 
     private fun base() = etServer.text.toString().trim().trimEnd('/')
     private fun token() = etToken.text.toString().trim()
@@ -90,6 +126,17 @@ class MainActivity : AppCompatActivity() {
         progressRow = findViewById(R.id.progressRow)
         pb = findViewById(R.id.pb)
         tvProgress = findViewById(R.id.tvProgress)
+        btnPause = findViewById(R.id.btnPause)
+
+        // targetSdk 35 强制 edge-to-edge：手动避让状态栏/导航栏/刘海/键盘
+        val root = findViewById<View>(R.id.root)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val bars: Insets = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            val ime: Insets = insets.getInsets(WindowInsetsCompat.Type.ime())
+            v.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
+            WindowInsetsCompat.CONSUMED
+        }
 
         val prefs = getSharedPreferences("privatedrop", MODE_PRIVATE)
         etServer.setText(prefs.getString("server", "http://8.141.122.46:8765"))
@@ -100,6 +147,17 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnSend).setOnClickListener { sendText() }
         findViewById<Button>(R.id.btnFile).setOnClickListener {
             if (!connected) toast("先连接服务器") else filePicker.launch("*/*")
+        }
+        btnPause.setOnClickListener {
+            val t = current ?: return@setOnClickListener
+            t.paused = !t.paused
+            btnPause.text = if (t.paused) "继续" else "暂停"
+        }
+        findViewById<Button>(R.id.btnCancel).setOnClickListener {
+            current?.let { t ->
+                t.cancelled = true
+                t.call?.cancel()
+            }
         }
     }
 
@@ -184,46 +242,41 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) { }
     }
 
-    // ---------- 传输进度 ----------
-    private fun showProgress(label: String) {
-        progressRow.visibility = View.VISIBLE
-        pb.progress = 0
-        tvProgress.text = label
-    }
-
-    private fun updateProgress(label: String, frac: Double) {
+    // ---------- 传输队列与进度 UI ----------
+    private fun startTransfer(label: String, block: (Transfer) -> Unit) {
+        val t = Transfer(label)
+        current = t
         runOnUiThread {
             progressRow.visibility = View.VISIBLE
-            pb.progress = (frac * 100).toInt().coerceIn(0, 100)
-            tvProgress.text = "$label ${ (frac * 100).toInt() }%"
+            pb.progress = 0
+            tvProgress.text = label
+            btnPause.text = "暂停"
+        }
+        transferExecutor.submit {
+            try {
+                block(t)
+                runOnUiThread {
+                    if (current === t) progressRow.visibility = View.GONE
+                    toast(if (t.cancelled) "已取消" else "$label 完成")
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (current === t) progressRow.visibility = View.GONE
+                    toast("${label}失败：${e.message}")
+                }
+            }
         }
     }
 
-    private fun hideProgress() = runOnUiThread { progressRow.visibility = View.GONE }
-
-    /** 带进度回调的 RequestBody。 */
-    private class ProgressRequestBody(
-        private val file: File,
-        private val onProgress: (Double) -> Unit,
-    ) : RequestBody() {
-        private val media = "application/octet-stream".toMediaType()
-
-        override fun contentType() = media
-        override fun contentLength() = file.length()
-
-        override fun writeTo(sink: BufferedSink) {
-            val total = file.length()
-            var sent = 0L
-            file.inputStream().use { input ->
-                val buf = ByteArray(64 * 1024)
-                while (true) {
-                    val n = input.read(buf)
-                    if (n < 0) break
-                    sink.write(buf, 0, n)
-                    sent += n
-                    if (total > 0) onProgress(sent.toDouble() / total)
-                }
-            }
+    private fun updateUi(t: Transfer, label: String, frac: Double, bytes: Long) {
+        val speed = t.tick(bytes)
+        if (speed == null && frac < 1.0) return
+        runOnUiThread {
+            if (current !== t) return@runOnUiThread
+            progressRow.visibility = View.VISIBLE
+            pb.progress = (frac * 100).toInt().coerceIn(0, 100)
+            tvProgress.text = if (frac < 1.0) "$label ${(frac * 100).toInt()}% · ${fmtSize(speed ?: 0.0)}/s"
+                              else "$label 100%"
         }
     }
 
@@ -328,28 +381,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun upload(uri: Uri) {
-        GlobalScope.launch(Dispatchers.IO) {
-            var cache: File? = null
+        startTransfer("上传") { t ->
+            val cache = File(cacheDir, "upload.bin")
             try {
-                val tmp = File(cacheDir, "upload.bin")
-                cache = tmp
                 contentResolver.openInputStream(uri)!!.use { input ->
-                    tmp.outputStream().use { input.copyTo(it) }
+                    cache.outputStream().use { input.copyTo(it) }
                 }
                 val name = queryName(uri)
-                val short = if (name.length > 14) name.take(14) + "…" else name
-                http.newCall(Request.Builder()
+                val req = Request.Builder()
                     .url(api("/api/upload?nick=${enc(nick())}&name=${enc(name)}"))
-                    .post(ProgressRequestBody(tmp) { updateProgress("↑ $short", it) })
-                    .build()).execute().close()
-                tmp.delete()
-                cache = null
-                hideProgress()
-                runOnUiThread { toast("上传完成") }
-            } catch (e: Exception) {
-                cache?.delete()
-                hideProgress()
-                runOnUiThread { toast("上传失败：${e.message}") }
+                    .post(ProgressRequestBody(cache) { sent, frac ->
+                        t.gate()
+                        updateUi(t, "↑ $name", frac, sent)
+                    })
+                    .build()
+                val call = http.newCall(req)
+                t.call = call
+                call.execute().close()
+            } finally {
+                cache.delete()
             }
         }
     }
@@ -363,38 +413,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun download(fid: String, name: String) {
-        GlobalScope.launch(Dispatchers.IO) {
-            try {
-                val short = if (name.length > 14) name.take(14) + "…" else name
-                http.newCall(Request.Builder().url(api("/api/file/$fid")).build())
-                    .execute().use { resp ->
-                        if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
-                        val total = resp.body!!.contentLength()
-                        val values = ContentValues().apply {
-                            put(MediaStore.Downloads.DISPLAY_NAME, name)
-                            put(MediaStore.Downloads.MIME_TYPE, mimeOf(name))
-                        }
-                        val uri = contentResolver.insert(
-                            MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                            ?: throw IOException("无法写入下载目录")
-                        contentResolver.openOutputStream(uri)!!.use { out ->
-                            val src = resp.body!!.byteStream()
-                            val buf = ByteArray(64 * 1024)
-                            var got = 0L
-                            while (true) {
-                                val n = src.read(buf)
-                                if (n < 0) break
-                                out.write(buf, 0, n)
-                                got += n
-                                if (total > 0) updateProgress("↓ $short", got.toDouble() / total)
-                            }
-                        }
+        startTransfer("下载") { t ->
+            val call = http.newCall(Request.Builder().url(api("/api/file/$fid")).build())
+            t.call = call
+            call.execute().use { resp ->
+                if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
+                val total = resp.body!!.contentLength()
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, name)
+                    put(MediaStore.Downloads.MIME_TYPE, mimeOf(name))
+                }
+                val uri = contentResolver.insert(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IOException("无法写入下载目录")
+                contentResolver.openOutputStream(uri)!!.use { out ->
+                    val src = resp.body!!.byteStream()
+                    val buf = ByteArray(64 * 1024)
+                    var got = 0L
+                    while (true) {
+                        t.gate()
+                        val n = src.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        got += n
+                        if (total > 0) updateUi(t, "↓ $name", got.toDouble() / total, got)
                     }
-                hideProgress()
-                runOnUiThread { toast("已保存到下载：$name") }
-            } catch (e: Exception) {
-                hideProgress()
-                runOnUiThread { toast("下载失败：${e.message}") }
+                }
             }
         }
     }
@@ -406,11 +450,39 @@ class MainActivity : AppCompatActivity() {
 
     private fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
-    private fun fmtSize(n: Long): String = when {
-        n < 1024 -> "$n B"
-        n < 1 shl 20 -> "%.1f KB".format(n / 1024.0)
-        n < 1 shl 30 -> "%.1f MB".format(n / 1048576.0)
-        else -> "%.2f GB".format(n / 1073741824.0)
+    private fun fmtSize(n: Double): String = when {
+        n < 1024 -> "%.0f B".format(n)
+        n < 1048576 -> "%.1f KB/s".format(n / 1024)
+        n < 1073741824 -> "%.1f MB/s".format(n / 1048576)
+        else -> "%.2f GB/s".format(n / 1073741824)
     }
+    private fun fmtSize(n: Long): String = fmtSize(n.toDouble())
+
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
+}
+
+/** 分块写入 + 进度回调的请求体（阻塞式，配合 gate() 支持暂停/取消）。 */
+private class ProgressRequestBody(
+    private val file: File,
+    private val onChunk: (sent: Long, frac: Double) -> Unit,
+) : RequestBody() {
+    private val media = "application/octet-stream".toMediaType()
+
+    override fun contentType() = media
+    override fun contentLength() = file.length()
+
+    override fun writeTo(sink: BufferedSink) {
+        val total = file.length()
+        var sent = 0L
+        file.inputStream().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                sink.write(buf, 0, n)
+                sent += n
+                onChunk(sent, if (total > 0) sent.toDouble() / total else 1.0)
+            }
+        }
+    }
 }
