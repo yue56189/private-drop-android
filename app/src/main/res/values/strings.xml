@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">私匣</string>
+    <string name="hint_server">服务器地址</string>
+    <string name="hint_token">口令</string>
+    <string name="hint_nick">昵称</string>
+    <string name="connect">连接</string>
+    <string name="hint_input">发送消息…</string>
+    <string name="send">发送</string>
+</resources>
