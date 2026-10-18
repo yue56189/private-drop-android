@@ -1,5 +1,7 @@
 package com.yue.privatedrop
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ContentValues
 import android.graphics.Typeface
 import android.net.Uri
@@ -13,6 +15,7 @@ import android.webkit.MimeTypeMap
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
@@ -128,13 +131,21 @@ class MainActivity : AppCompatActivity() {
         tvProgress = findViewById(R.id.tvProgress)
         btnPause = findViewById(R.id.btnPause)
 
-        // targetSdk 35 强制 edge-to-edge：手动避让状态栏/导航栏/刘海/键盘
+        // targetSdk 35 强制 edge-to-edge：
+        // 底部避让导航栏/键盘；顶部由各界面自定（登录页图片全屏出血，聊天页避开状态栏）
         val root = findViewById<View>(R.id.root)
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val bars: Insets = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             val ime: Insets = insets.getInsets(WindowInsetsCompat.Type.ime())
-            v.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
+            v.setPadding(bars.left, 0, bars.right, maxOf(bars.bottom, ime.bottom))
+            chatRoot.setPadding(0, bars.top, 0, 0)
+            // 键盘弹出时消息滚动到底部
+            if (ime.bottom > 0) scroll.post { scroll.fullScroll(ScrollView.FOCUS_DOWN) }
+            // 状态栏图标明暗随界面切换：登录页（深色图）用浅图标，聊天页（浅底）用深图标
+            val w = window
+            WindowCompat.getInsetsController(w, w.decorView)
+                .isAppearanceLightStatusBars = loginRoot.visibility != View.VISIBLE
             WindowInsetsCompat.CONSUMED
         }
 
@@ -305,20 +316,58 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addBubble(nick: String, text: String, mine: Boolean, ts: Long) {
-        val tv = TextView(this).apply {
-            textSize = 15f
-            setText("$text   ${timeStr(ts)}")
-            setTextColor(ContextCompat.getColor(context,
-                if (mine) R.color.on_primary_container else R.color.on_surface))
+        val txtColor = ContextCompat.getColor(context,
+            if (mine) R.color.on_primary_container else R.color.on_surface)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             background = ContextCompat.getDrawable(context,
                 if (mine) R.drawable.bg_bubble_mine else R.drawable.bg_bubble_other)
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            maxWidth = dp(280)
+            setPadding(dp(12), dp(7), dp(12), dp(6))
+        }
+        val tvMsg = TextView(this).apply {
+            textSize = 15f
+            setText(text)
+            setTextColor(txtColor)
+            maxWidth = dp(260)
+        }
+        val tvTime = TextView(this).apply {
+            text = timeStr(ts); textSize = 10f; gravity = Gravity.END
+            setTextColor(txtColor); alpha = 0.55f
+        }
+        col.addView(tvMsg); col.addView(tvTime)
+        col.tag = text
+        col.setOnLongClickListener { v ->
+            showMsgMenu(v, v.tag as String)
+            true
         }
         val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         if (!mine) wrap.addView(nickLabel(nick))
-        wrap.addView(tv)
+        wrap.addView(col)
         addRow(wrap, mine)
+    }
+
+    /** 长按文字消息：复制 / 引用。 */
+    private fun showMsgMenu(v: View, text: String) {
+        val pm = PopupMenu(this, v)
+        pm.menu.add("复制")
+        pm.menu.add("引用")
+        pm.setOnMenuItemClickListener { item ->
+            when (item.title) {
+                "复制" -> {
+                    val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("msg", text))
+                    toast("已复制")
+                }
+                "引用" -> {
+                    val quoted = text.lines().joinToString("\n") { "> $it" }
+                    etInput.setText("$quoted\n")
+                    etInput.setSelection(etInput.text.length)
+                    etInput.requestFocus()
+                }
+            }
+            true
+        }
+        pm.show()
     }
 
     private fun addFileCard(nick: String, fid: String, name: String, size: Long, mine: Boolean, ts: Long) {
