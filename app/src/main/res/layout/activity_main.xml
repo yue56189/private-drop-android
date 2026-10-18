@@ -172,7 +172,7 @@
                     android:textSize="12sp"
                     android:textColor="@color/on_surface_variant"
                     android:maxLines="1"
-                    android:ellipsize="android.text.TextUtils.TruncateAt.END" />
+                    android:ellipsize="end" />
 
                 <Button
                     android:id="@+id/btnPause"
